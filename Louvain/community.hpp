@@ -1,6 +1,32 @@
 // community.hpp
 #pragma once
-#include <graph.hpp>
+
+#include <algorithm>
+#include <chrono>
+#include <functional>
+#include <map>
+#include <numeric>
+#include <random>
+#include <vector>
+
+#include "graph.hpp"
+
+// 离散化 vec 中的数值到 0 开始的整数
+// 要求类型 vecType 支持 operator <
+// 记 vec 大小为 n, 时间复杂度 O(n log n)
+template<typename vecType>
+std::vector<int> discretize(const std::vector<vecType>& vec) {
+  auto tmp = vec;
+  std::sort(tmp.begin(), tmp.end());
+  tmp.erase(std::unique(tmp.begin(), tmp.end()), tmp.end());
+
+  int n = vec.size();
+  std::vector<int> result(n);
+  for (int i = 0; i < n; ++i) {
+    result[i] = lower_bound(tmp.begin(), tmp.end(), vec[i]) - tmp.begin();
+  }
+  return result;
+}
 
 // 给定网络 G 和一种划分 community, 计算模块度 (Modularity)
 // 对于两个结点 i, j, 两者在同一社区等价于 community[i] == community[j]
@@ -29,6 +55,8 @@ double Modularity(const Graph& G, const std::vector<int>& community) {
   return Q;
 }
 
+// Louvain
+// 时间复杂度 O((n + m) log n)
 std::vector<int> LouvainCommunityDetect(const Graph& G) {
   // node_num: G 的点数
   int node_num = G.size();
@@ -110,5 +138,44 @@ std::vector<int> LouvainCommunityDetect(const Graph& G) {
     std::swap(adj, next_adj);
   }
 
-  return community;
+  return discretize(community);
+}
+
+// Label Propagetion Algorithm
+// 使用异步更新
+std::vector<int> LabelPropagation(const Graph& G) {
+  int node_num = G.size();
+
+  std::vector<int> community(node_num);
+  std::iota(community.begin(), community.end(), 0);
+
+  auto rng_seed = std::chrono::steady_clock::now().time_since_epoch().count();
+  std::mt19937 rng(rng_seed);
+
+  while (true) {
+    bool improvement = false;
+    for (int u = 0; u < node_num; ++u) {
+      std::unordered_map<int, int> du;
+      for (auto [from, to, weight]: G[u]) {
+        int v = community[to];
+        du[v] += weight;
+      }
+      int best_du = -1;
+      for (auto [com, val]: du)
+        if (val > best_du) best_du = val;
+      std::vector<int> choices;
+      for (auto [com, val]: du)
+        if (val == best_du) choices.push_back(com);
+      std::shuffle(choices.begin(), choices.end(), rng);
+      int best_community = *choices.begin();
+      if (community[u] != best_community) {
+        improvement = true;
+        community[u] = best_community;
+      }
+    }
+    if (!improvement)
+      break;
+  }
+  
+  return discretize(community);
 }
